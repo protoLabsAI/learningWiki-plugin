@@ -278,6 +278,16 @@ class WikiStore:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    def all_links(self) -> list[dict]:
+        """Every edge as {from_slug, to_slug, rel} — the knowledge-map's input."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT a.slug AS from_slug, b.slug AS to_slug, l.rel FROM links l"
+                " JOIN pages a ON a.id = l.from_page JOIN pages b ON b.id = l.to_page"
+                " ORDER BY a.slug, b.slug, l.rel"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     def _backlinks_of(self, page_id: int) -> list[dict]:
         rows = self._conn.execute(
             "SELECT l.rel, p.slug, p.title FROM links l JOIN pages p ON p.id = l.from_page WHERE l.to_page = ?",

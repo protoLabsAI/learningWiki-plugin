@@ -3,7 +3,7 @@
 # (tests/test_packaging.py enforces it).
 id: learning_wiki
 name: Learning Wiki
-version: 0.2.2
+version: 0.3.0
 description: >-
   An adaptive learning wiki: the agent maintains a persistent, interlinked wiki
   of concept pages (Karpathy's LLM-wiki pattern) PLUS a learner ledger — per-concept
@@ -47,6 +47,13 @@ settings:
 
 views:
   - { id: wiki, label: "Wiki", icon: BookOpen, path: /plugins/learning_wiki/view }
+  # Utility-bar pill (bottom-left): opens the wiki in a dialog; the dot on it
+  # lights with any learning_wiki.* event, so due reviews surface without a rail trip.
+  - id: due
+    label: "Reviews"
+    icon: Timer
+    path: /plugins/learning_wiki/view
+    utility: { info: "Spaced-review status — click to open the wiki" }
 
 # Typed event contracts (#1636). Any topic under `learning_wiki.*` also lights
 # the Wiki rail icon's notification dot until the surface is opened.

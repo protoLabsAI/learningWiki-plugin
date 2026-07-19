@@ -17,6 +17,7 @@ EXPECTED_TOOLS = {
     "card_add",
     "review_next",
     "review_grade",
+    "wiki_map",
     "wiki_export",
     "wiki_research",
 }
@@ -137,3 +138,23 @@ def test_wiki_export_tool(registry, tmp_path):
     tool_by_name(registry, "wiki_file").invoke({"slug": "a", "content_md": "body"})
     out = json.loads(tool_by_name(registry, "wiki_export").invoke({"out_dir": str(tmp_path / "exp")}))
     assert out["ok"] and out["files"] == 1
+
+
+def test_wiki_map_saves_svg_and_returns_inline_markdown(registry):
+    out = json.loads(tool_by_name(registry, "wiki_map").invoke({}))
+    assert out["ok"] is False and "empty" in out["error"]
+
+    tool_by_name(registry, "wiki_file").invoke({"slug": "a", "content_md": "needs [[b]]"})
+    md = tool_by_name(registry, "wiki_map").invoke({})
+    assert md.startswith("![knowledge map](/media/m1.svg)")
+    assert "2 pages" in md and "2 novice" in md
+    assert registry.media[0]["mime"] == "image/svg+xml"
+
+
+def test_wiki_map_degrades_without_media_store(store):
+    from learning_wiki.tools import build_tools
+
+    store.upsert_page("a")
+    tools = {t.name: t for t in build_tools({}, lambda: store, registry=None)}
+    out = json.loads(tools["wiki_map"].invoke({}))
+    assert out["ok"] is False and "media store" in out["error"]

@@ -17,12 +17,16 @@ deliberately declines) is documented in [SEAMS.md](./SEAMS.md).
 
 ## What it contributes
 
-- **12 tools** — `wiki_index` / `wiki_page` / `wiki_file` / `wiki_link` (content
+- **13 tools** — `wiki_index` / `wiki_page` / `wiki_file` / `wiki_link` (content
   model, typed edges incl. `prerequisite`), `ledger_status` / `ledger_record` /
   `ledger_misconception` (learner model), `card_add` / `review_next` /
-  `review_grade` (FSRS review loop), `wiki_export` (markdown dump),
-  `wiki_research` (optional [rabbit-hole](https://github.com/protoLabsAI/rabbit-hole.io)
-  `rh` CLI acquisition, off by default).
+  `review_grade` (FSRS review loop), `wiki_map` (**the knowledge map**: your
+  wiki as a tier-colored SVG with prerequisite arrows, rendered inline in chat
+  via the media store), `wiki_export` (markdown dump), `wiki_research`
+  (optional [rabbit-hole](https://github.com/protoLabsAI/rabbit-hole.io)
+  `rh` CLI acquisition, off by default). Plus **tutor knobs** on a host:
+  `tutor_knobs` / `tutor_tune` / `tutor_preset` live-tune `desired_retention`
+  and `session_limit` (presets: `exam-cram`, `steady`, `light`).
 - **`learning-tutor` skill** — the evidence-based session policy: reviews first,
   probe-first diagnosis (never trust self-report), tier-matched scaffolding
   (novice → worked examples, frontier → one-idea-per-tier generation, fluent →
@@ -37,9 +41,13 @@ deliberately declines) is documented in [SEAMS.md](./SEAMS.md).
   loop**: a study cadence plus a ledger-verified watch
   (`learning_wiki:strength`) that cancels the cadence when you actually reach
   the target. Goal verifiers also work with `/goal`.
+- **A2A card skills** — `learning_status` (structured ledger snapshot) and
+  `quiz_me` (due prompts, answers withheld) let other fleet agents query your
+  frontier over A2A and get schema-enforced JSON back.
 - **Console view** — a "Wiki" rail icon: page list with tier dots + due badges,
-  page reader with `[[wikilink]]` navigation, links/backlinks. Any
-  `learning_wiki.*` event lights its notification dot.
+  page reader with `[[wikilink]]` navigation, links/backlinks; responsive to
+  its panel width via container query. A utility-bar pill opens the same page
+  in a dialog. Any `learning_wiki.*` event lights the notification dots.
 - **Review-nudge surface + wake hook** — inert by default; with
   `nudge_interval_hours > 0` it emits `learning_wiki.reviews_due` (typed
   contract in the manifest) when cards are due, and a desktop wake triggers a

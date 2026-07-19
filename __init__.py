@@ -116,14 +116,24 @@ def register(registry) -> None:
     except Exception:  # noqa: BLE001
         log.exception("[learning_wiki] registering surface failed")
 
-    # 3. Tools — the only mutation path the model gets.
+    # 3. Tools — the only mutation path the model gets. The registry rides along
+    #    for save_media (wiki_map's inline SVG).
     try:
         from .tools import build_tools
 
-        for t in build_tools(cfg, get_store):
+        for t in build_tools(cfg, get_store, registry=registry):
             registry.register_tool(t)
     except Exception:  # noqa: BLE001
         log.exception("[learning_wiki] registering tools failed")
+
+    # 3b. Tutor knobs (graph.sdk Knobs): tutor_knobs/_tune/_preset tools; [] host-free.
+    try:
+        from .knobs import build_knob_tools
+
+        for t in build_knob_tools():
+            registry.register_tool(t)
+    except Exception:  # noqa: BLE001
+        log.exception("[learning_wiki] registering knob tools failed")
 
     # 4. The tutor skill (probe-first, tiered, answer-holding — the policy layer).
     try:
@@ -162,6 +172,16 @@ def register(registry) -> None:
                 registry.register_chat_command(name, handler)
     except Exception:  # noqa: BLE001
         log.exception("[learning_wiki] registering chat commands failed")
+
+    # 7b. A2A card skills: structured learner-status + quiz material for other agents.
+    try:
+        from .a2a import A2A_SKILLS
+
+        if hasattr(registry, "register_a2a_skill"):
+            for skill in A2A_SKILLS:
+                registry.register_a2a_skill(skill)
+    except Exception:  # noqa: BLE001
+        log.exception("[learning_wiki] registering a2a skills failed")
 
     # 8. Lifecycle: desktop wake → due check (the rail dot lights via reviews_due).
     try:

@@ -14,6 +14,9 @@ import subprocess
 
 from langchain_core.tools import tool
 
+from .knobs import knob_value
+from .knowledge_map import MAP_CAP, render_map
+
 log = logging.getLogger("protoagent.plugins.learning_wiki")
 
 
@@ -25,8 +28,8 @@ def _err(msg: str) -> str:
     return json.dumps({"ok": False, "error": str(msg)[:500]})
 
 
-def build_tools(cfg: dict, get_store):
-    desired_retention = float(cfg.get("desired_retention") or 0.9)
+def build_tools(cfg: dict, get_store, registry=None):
+    cfg_retention = float(cfg.get("desired_retention") or 0.9)
     weights = list(cfg.get("fsrs_weights") or []) or None
 
     @tool
@@ -160,10 +163,10 @@ def build_tools(cfg: dict, get_store):
             return _err(e)
 
     @tool
-    def review_next(limit: int = 8) -> str:
-        """Fetch due review cards, interleaved across concepts (deliberately not blocked by topic). Quiz the learner one card at a time WITHOUT revealing answers, then grade each attempt with review_grade."""
+    def review_next(limit: int = 0) -> str:
+        """Fetch due review cards, interleaved across concepts (deliberately not blocked by topic). Default limit comes from the tutor session_limit knob. Quiz the learner one card at a time WITHOUT revealing answers, then grade each attempt with review_grade."""
         try:
-            cards = get_store().due_cards(limit=limit)
+            cards = get_store().due_cards(limit=limit or int(knob_value("session_limit", 8)))
             slim = [{k: c[k] for k in ("id", "slug", "prompt", "origin", "reps", "due")} for c in cards]
             return _ok(cards=slim, due_total=get_store().due_count())
         except Exception as e:  # noqa: BLE001
@@ -174,7 +177,11 @@ def build_tools(cfg: dict, get_store):
         """Grade one reviewed card honestly: 1=again (failed), 2=hard, 3=good, 4=easy. FSRS reschedules the card (again returns within ~10 min; success grows the interval) and the outcome updates concept strength. Never inflate a rating to be kind — miscalibration poisons the schedule."""
         try:
             out = get_store().grade_card(
-                card_id, rating, note=note, weights=weights, desired_retention=desired_retention
+                card_id,
+                rating,
+                note=note,
+                weights=weights,
+                desired_retention=float(knob_value("desired_retention", cfg_retention)),
             )
             card = out["card"]
             return _ok(
@@ -185,6 +192,32 @@ def build_tools(cfg: dict, get_store):
                 interval_days=card["interval_days"],
                 ledger=out["ledger"],
             )
+        except Exception as e:  # noqa: BLE001
+            return _err(e)
+
+    @tool
+    def wiki_map() -> str:
+        """Render the knowledge map — every wiki page colored by learner tier (novice amber / frontier blue / fluent green) with prerequisite arrows — as an inline image. Use when asked to 'show my knowledge', to spot gaps, or to pick what to learn next: an amber node feeding many arrows is the highest-leverage thing to strengthen."""
+        try:
+            store = get_store()
+            pages = store.list_pages()
+            if not pages:
+                return _err("the wiki is empty — nothing to map yet")
+            if registry is None or not hasattr(registry, "save_media"):
+                return _err("this host has no media store (save_media) — upgrade protoAgent to render the map")
+            svg = render_map(pages, store.all_links())
+            ref = registry.save_media(svg.encode("utf-8"), "image/svg+xml", {"pages": len(pages)})
+            url = getattr(ref, "url", "") or (ref.get("url", "") if isinstance(ref, dict) else "")
+            tiers = {"novice": 0, "frontier": 0, "fluent": 0}
+            for p in pages:
+                tiers[p["tier"]] = tiers.get(p["tier"], 0) + 1
+            caption = (
+                f"{len(pages)} pages — {tiers['novice']} novice · {tiers['frontier']} frontier · "
+                f"{tiers['fluent']} fluent"
+            )
+            if len(pages) > MAP_CAP:
+                caption += f" (showing the {MAP_CAP} most recently updated — {len(pages) - MAP_CAP} omitted)"
+            return f"![knowledge map]({url})\n\n{caption}"
         except Exception as e:  # noqa: BLE001
             return _err(e)
 
@@ -234,6 +267,7 @@ def build_tools(cfg: dict, get_store):
         card_add,
         review_next,
         review_grade,
+        wiki_map,
         wiki_export,
         wiki_research,
     ]

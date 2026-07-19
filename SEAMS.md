@@ -23,8 +23,11 @@ surface: `graph/plugins/registry.py` in the protoAgent repo.
 | `register_lifecycle_hook` | `__init__.py` | `on_system_wake` → due check. Spaced repetition's most natural trigger is "the laptop opened in the morning" (ADR 0074). |
 | `emit` + typed `emits:` | `nudge.py`, manifest | `reviews_due` / `goal_achieved` with payload schemas (#1636). Any `learning_wiki.*` topic also lights the Wiki rail icon's notification dot — free UI. |
 | `graph.sdk.record_metric` | `nudge.py` | Plugin-owned metric series (`due_cards`) — strength-over-time charts later, zero storage code now. |
+| `registry.save_media` | `tools.py` `wiki_map` | The knowledge map: pages as tier-colored nodes, prerequisite arrows, rendered as pure-Python SVG into the core media store — inline in chat via the HMAC-signed URL, no plugin route, no UI change (#1929). |
+| `graph.sdk.Knobs` + `make_knob_tools` | `knobs.py` | Live-tunable tutor settings with presets (`exam-cram` / `steady` / `light`). Only knobs the code actually reads: `desired_retention` feeds FSRS in `review_grade`, `session_limit` caps `review_next`. |
+| `register_a2a_skill` ×2 | `a2a.py` | `learning_status` and `quiz_me` card skills with output schemas — fleet agents get parseable JSON, not prose. Quiz answers stay local by contract: grading needs the attempt in context. |
 | Manifest `settings:` / `guide_url` / `capabilities` | manifest | Config renders in the console Settings dialog; setup guide links the README; capabilities declare network `[]` + scoped filesystem. |
-| Manifest `views:` | manifest + `view.py` | Four-rules iframe rail view (slug-aware base, DS kit, gated data, no hand-rolled theming). |
+| Manifest `views:` (rail + `utility:` pill) | manifest + `view.py` | Four-rules iframe rail view (slug-aware base, DS kit, gated data, no hand-rolled theming), responsive by container query; plus a utility-bar pill opening the same page in a dialog. |
 
 ## Seams deliberately skipped
 
@@ -36,9 +39,10 @@ surface: `graph/plugins/registry.py` in the protoAgent repo.
 | `slot: "chat"` view | Never hijack the chat panel for a side-surface; the tutor lives *in* chat already. |
 | `register_late_tool_factory` | For meta-tools that must see the whole toolset (e.g. execute_code). No such need. |
 | `register_thread_id_resolver` | Session mapping is the host's business; nothing here changes checkpointer identity. |
-| `register_middleware` | Considered for frontier-injection before each model call; deferred — always-on context injection from an example plugin is invasive. If added, it ships config-gated **off**. |
+| `register_middleware` | Considered for frontier-injection before each model call; declined after reading the contract — `before_model` **appends messages to the transcript** (see `graph/middleware/stall_guard.py`), so always-on injection pollutes every turn of every chat. The tutor skill reads `ledger_status` on demand instead. |
+| `register_workflow_dir` | Tutoring is *contingent* — every next step depends on the learner's last answer. A static-DAG workflow would re-implement the `learning-tutor` skill worse. Workflows fit fixed pipelines (research → compress → report), not dialogue. |
+| `multimodal_tool_result` | Genuine fit on paper (let vision models *see* the knowledge map), but it takes raster formats and the map is SVG — rasterizing means a pip dep, and the zero-dep stance wins. Revisit if the host ever grows server-side SVG rasterization. |
 | `builtin: true` | Reserved for core infra; a showcase must live and die by the normal trust model (`enabled: false`, operator opt-in). |
-| `save_media` / `multimodal_tool_result` | Genuine fit (a tier-colored knowledge-map SVG the model can *see*) — queued for v0.3, not skipped. Same for `Knobs`, `register_a2a_skill`, a workflow recipe, and the `utility:` due-count pill. |
 
 ## Testing the seams host-free
 

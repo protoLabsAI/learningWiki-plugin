@@ -41,6 +41,8 @@ class FakeRegistry:
         self.watch_hooks: list = []
         self.lifecycle_hooks: list = []
         self.chat_commands: dict = {}
+        self.a2a_skills: list = []
+        self.media: list = []
         self.events: list = []
 
     def register_tool(self, t):
@@ -72,6 +74,13 @@ class FakeRegistry:
     def register_chat_command(self, name, handler):
         self.chat_commands[name] = handler
 
+    def register_a2a_skill(self, spec):
+        self.a2a_skills.append(spec)
+
+    def save_media(self, data, mime, meta=None):
+        self.media.append({"bytes": len(data), "mime": mime, "meta": meta or {}})
+        return types.SimpleNamespace(id="m1", url="/media/m1.svg", path="/tmp/m1.svg", mime=mime)
+
     def emit(self, topic, data):
         self.events.append((topic, data))
 
@@ -85,17 +94,25 @@ def store(tmp_path):
     s.close()
 
 
+def _reset_plugin_state():
+    import learning_wiki
+    from learning_wiki.knobs import _reset_knobs_for_tests
+
+    learning_wiki._reset_store_for_tests()
+    _reset_knobs_for_tests()
+
+
 @pytest.fixture
 def registry(tmp_path, monkeypatch):
     """A registered plugin against an isolated tmp store (no host stubs)."""
     import learning_wiki
 
     monkeypatch.setenv("LEARNING_WIKI_DIR", str(tmp_path))
-    learning_wiki._reset_store_for_tests()
+    _reset_plugin_state()
     reg = FakeRegistry()
     learning_wiki.register(reg)
     yield reg
-    learning_wiki._reset_store_for_tests()
+    _reset_plugin_state()
 
 
 @pytest.fixture
@@ -140,10 +157,32 @@ def host_stub(monkeypatch):
         calls["metrics"].append((name, value, plugin_id))
         return {}
 
+    class Knobs:
+        def __init__(self, **kw):
+            self.values_map: dict = {}
+            self.presets_map: dict = {}
+
+        def define(self, name, default, **kw):
+            self.values_map[name] = default
+            return self
+
+        def preset(self, name, overrides, **kw):
+            self.presets_map[name] = overrides
+            return self
+
+        def get(self, name):
+            return self.values_map[name]
+
+    def make_knob_tools(knobs, *, prefix, **kw):
+        calls["knob_prefix"] = prefix
+        return []
+
     sdk.schedule_recurring = schedule_recurring
     sdk.cancel_scheduled = cancel_scheduled
     sdk.create_watch = create_watch
     sdk.record_metric = record_metric
+    sdk.Knobs = Knobs
+    sdk.make_knob_tools = make_knob_tools
 
     g.goals = goals_pkg
     g.subagents = sub_pkg
@@ -169,11 +208,11 @@ def registry_hosted(tmp_path, monkeypatch, host_stub):
     import learning_wiki
 
     monkeypatch.setenv("LEARNING_WIKI_DIR", str(tmp_path))
-    learning_wiki._reset_store_for_tests()
+    _reset_plugin_state()
     reg = FakeRegistry(config={"review_cron": "0 9 * * *", "lint_cron": "0 7 * * 1"})
     learning_wiki.register(reg)
     yield reg, host_stub
-    learning_wiki._reset_store_for_tests()
+    _reset_plugin_state()
 
 
 def tool_by_name(reg, name: str):

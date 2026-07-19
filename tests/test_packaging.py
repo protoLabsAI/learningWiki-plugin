@@ -40,6 +40,13 @@ def test_view_declared_on_public_prefix():
     assert not views[0]["path"].startswith("/api/")
 
 
+def test_utility_pill_shares_the_view_page():
+    views = _manifest()["views"]
+    pill = next(v for v in views if v.get("utility"))
+    assert pill["path"] == views[0]["path"]  # same page, second placement
+    assert pill["utility"]["info"]
+
+
 def test_config_defaults_present():
     cfg = _manifest()["config"]
     for key in (
