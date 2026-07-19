@@ -2,7 +2,14 @@
 kit — no build step. Left pane: page list with tier dots + due badges. Right
 pane: the page, rendered by a deliberately tiny markdown renderer (headings,
 emphasis, code, lists, links, [[wikilinks]] navigate in-view). The view READS;
-mutation stays with the tools + the tutor skill."""
+mutation stays with the tools + the tutor skill.
+
+Responsive by CONTAINER query, not media query: the page lives in a resizable
+panel (rail iframe, right sidebar, palette, dialog), so the breakpoint keys
+off the panel's own inline size. Below 560px it collapses to a single-pane
+list ⇄ reader flow (`.page-open` toggles which) with a back button and
+touch-floor tap targets; wide layouts ignore the class entirely.
+"""
 
 from __future__ import annotations
 
@@ -14,7 +21,7 @@ PAGE = r"""<!doctype html>
   *{box-sizing:border-box}
   html,body{margin:0;height:100%;background:var(--pl-color-bg);color:var(--pl-color-fg);
     font-family:var(--pl-font-sans);font-size:13px}
-  .wrap{display:flex;height:100vh}
+  .wrap{display:flex;height:100vh;container-type:inline-size;container-name:wiki}
   .list{width:290px;min-width:220px;border-right:var(--pl-border-width) solid var(--pl-color-border);
     overflow-y:auto;padding:var(--pl-space-3)}
   .reader{flex:1;overflow-y:auto;padding:var(--pl-space-4) var(--pl-space-6)}
@@ -30,6 +37,11 @@ PAGE = r"""<!doctype html>
   .dot.frontier{background:var(--pl-color-status-info,#6f9bff)}
   .dot.fluent{background:var(--pl-color-status-success,#57b98a)}
   .due{font-size:10px;font-family:var(--pl-font-mono);color:var(--pl-color-status-warning,#d9a441)}
+  .back{display:none;align-items:center;gap:6px;margin:0 0 var(--pl-space-3);
+    background:var(--pl-color-bg-raised);color:var(--pl-color-fg);cursor:pointer;
+    border:var(--pl-border-width) solid var(--pl-color-border);border-radius:var(--pl-radius);
+    font:inherit;padding:8px 12px}
+  .back:hover{border-color:var(--pl-color-accent)}
   .meta{display:flex;gap:var(--pl-space-3);align-items:center;flex-wrap:wrap;
     font-size:11px;color:var(--pl-color-fg-muted);margin:0 0 var(--pl-space-3)}
   .pill{border:1px solid var(--pl-color-border);border-radius:99px;padding:1px 8px}
@@ -46,6 +58,19 @@ PAGE = r"""<!doctype html>
   .links .h{text-transform:uppercase;letter-spacing:.06em;font-size:10.5px;
     color:var(--pl-color-fg-muted);margin-bottom:6px}
   .empty{color:var(--pl-color-fg-muted);padding:var(--pl-space-4)}
+
+  /* Narrow PANEL (not viewport): single-pane list ⇄ reader. The container is
+     .wrap itself, so only descendants are styled here (spec: a container's own
+     size query can't restyle the container). */
+  @container wiki (max-width: 560px){
+    .list{width:100%;min-width:0;border-right:none}
+    .reader{display:none;padding:var(--pl-space-3) var(--pl-space-4)}
+    .page-open .list{display:none}
+    .page-open .reader{display:block}
+    .back{display:inline-flex}
+    /* ADR 0086 touch floor: comfortable tap targets on phone-width panels. */
+    .item{padding:11px 10px}
+  }
 </style>
 <script>
   // RULE 3 — slug-aware base ("" on host, "/agents/<slug>" through the fleet proxy).
@@ -55,13 +80,16 @@ PAGE = r"""<!doctype html>
     l.href=BASE+"/_ds/plugin-kit.css"; document.head.appendChild(l); })();
 </script>
 </head><body>
-<div class="wrap">
+<div class="wrap" id="wrap">
   <div class="list">
     <div class="top"><h1>Wiki</h1><span class="stats" id="stats"></span></div>
     <div id="err" class="pl-callout pl-callout--error" hidden></div>
     <div id="items"></div>
   </div>
-  <div class="reader"><div id="page" class="empty">Select a page — or ask the agent to teach you something.</div></div>
+  <div class="reader">
+    <button class="back" data-back type="button">← Pages</button>
+    <div id="page" class="empty">Select a page — or ask the agent to teach you something.</div>
+  </div>
 </div>
 <script type="module">
   // RULE 4 — plugin-kit.js is an ES module → dynamic import, with a tokenless shim fallback.
@@ -140,11 +168,14 @@ PAGE = r"""<!doctype html>
           ${page.links.length ? `<div class="h">Links</div>` + page.links.map(linkRow).join(" ") : ""}
           ${page.backlinks.length ? `<div class="h" style="margin-top:8px">Referenced by</div>` + page.backlinks.map(linkRow).join(" ") : ""}
         </div>`;
+      $("wrap").classList.add("page-open");            // narrow panel: reader takes over
+      document.querySelector(".reader").scrollTop = 0;
       loadList();
     } catch (e) { $("err").hidden = false; $("err").textContent = "" + e; }
   }
 
   document.addEventListener("click", (ev) => {
+    if (ev.target.closest("[data-back]")) { $("wrap").classList.remove("page-open"); return; }
     const wl = ev.target.closest("[data-wl]");
     if (wl) { openPage(wl.dataset.wl.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")); return; }
     const item = ev.target.closest(".item[data-slug]");

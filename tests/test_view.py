@@ -29,3 +29,18 @@ def test_no_handrolled_theme_or_handshake():
 def test_boot_is_handshake_or_timer():
     assert "kit.initPluginView" in PAGE
     assert "setTimeout(boot" in PAGE
+
+
+def test_responsive_by_container_query_not_media_query():
+    # The page lives in a RESIZABLE panel — breakpoints key off the panel's
+    # inline size, never the viewport.
+    assert "container-type:inline-size" in PAGE
+    assert "@container wiki (max-width: 560px)" in PAGE
+    assert "@media" not in PAGE
+
+
+def test_narrow_layout_has_back_navigation():
+    assert "page-open" in PAGE
+    assert "data-back" in PAGE
+    assert 'classList.add("page-open")' in PAGE
+    assert 'classList.remove("page-open")' in PAGE
