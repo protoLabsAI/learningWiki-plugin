@@ -2,8 +2,8 @@
 # importing plugin code). Keep `version` in lockstep with pyproject.toml
 # (tests/test_packaging.py enforces it).
 id: learning_wiki
-name: Learning Wiki (wiki + learner ledger + spaced review)
-version: 0.2.0
+name: Learning Wiki
+version: 0.2.1
 description: >-
   An adaptive learning wiki: the agent maintains a persistent, interlinked wiki
   of concept pages (Karpathy's LLM-wiki pattern) PLUS a learner ledger — per-concept
