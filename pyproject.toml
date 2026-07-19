@@ -1,0 +1,25 @@
+[project]
+name = "learning-wiki"
+version = "0.1.0"
+description = "Adaptive learning-wiki plugin for protoAgent: LLM-maintained wiki + learner ledger + FSRS spaced review."
+requires-python = ">=3.11"
+
+# Runtime deps come from the protoAgent host (langchain-core, fastapi) — this
+# plugin adds none: storage is stdlib sqlite3 and the FSRS scheduler is pure
+# Python. The optional acquisition backend is the external `rh` CLI (rabbit-hole),
+# gated behind `rh_enabled`. So `requires_pip` in the manifest is empty.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+ignore = ["E402", "E501", "E702", "E731", "E741"]
+
+[tool.ruff.lint.per-file-ignores]
+"**/__init__.py" = ["F401"]

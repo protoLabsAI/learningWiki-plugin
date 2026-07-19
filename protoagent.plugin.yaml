@@ -1,0 +1,44 @@
+# protoagent.plugin.yaml — manifest (data only; the host reads this without
+# importing plugin code). Keep `version` in lockstep with pyproject.toml
+# (tests/test_packaging.py enforces it).
+id: learning_wiki
+name: Learning Wiki (wiki + learner ledger + spaced review)
+version: 0.1.0
+description: >-
+  An adaptive learning wiki: the agent maintains a persistent, interlinked wiki
+  of concept pages (Karpathy's LLM-wiki pattern) PLUS a learner ledger — per-concept
+  strength, misconception log, and FSRS-scheduled retrieval cards. The load-bearing
+  invariant: only retrieval events (ledger_record / review_grade) move strength;
+  reading never does. Contributes 12 tools (wiki_file/wiki_page/review_next/...),
+  a `learning-tutor` skill encoding the evidence-based tutoring policy (probe-first
+  diagnosis, tiered scaffolding, answer-holding, plain-spoken correction, restatement
+  filing), a console Wiki view, and an optional review-nudge surface that emits
+  `learning_wiki.reviews_due` on the event bus. Storage is instance-scoped SQLite;
+  no runtime pip deps. Optional acquisition backend: the rabbit-hole `rh` CLI
+  (off by default; needs `rh` on PATH). Design: docs/adr/0001-learning-wiki.md.
+
+  Ships DISABLED; enable with `plugins: { enabled: [learning_wiki] }`.
+enabled: false
+repository: https://github.com/protoLabsAI/learningWiki-plugin
+min_protoagent_version: "0.34.0"
+
+config_section: learning_wiki
+config:
+  data_dir: ""              # override the store dir; default = instance_paths().store("learning_wiki")
+  desired_retention: 0.9    # FSRS target retrievability at review time (0.7–0.97 sane)
+  fsrs_weights: []          # 17 floats overriding the FSRS-4.5 defaults (empty = published defaults)
+  nudge_interval_hours: 0   # >0 = background surface checks due cards every N hours
+                            # and emits `learning_wiki.reviews_due`; 0 = surface inert
+  rh_enabled: false         # opt-in: wiki_research tool shells out to the rabbit-hole `rh` CLI
+  rh_bin: rh                # rh binary (or set an absolute path)
+  rh_timeout_s: 300         # subprocess timeout for `rh research`
+
+views:
+  - { id: wiki, label: "Wiki", icon: BookOpen, path: /plugins/learning_wiki/view }
+
+# Declarative transparency. Network is [] because the plugin itself opens no
+# sockets; enabling `rh_enabled` delegates web access to the external rh CLI
+# (its own config decides where that goes).
+capabilities:
+  network: []
+  filesystem: scoped

@@ -1,0 +1,8 @@
+# Test-only deps. At runtime langchain-core + fastapi are provided by the host
+# (protoAgent); these let the suite run standalone in CI with no host. The plugin
+# itself adds NO runtime pip deps (sqlite3 + pure-Python FSRS).
+fastapi>=0.110
+langchain-core>=0.2
+pyyaml>=6
+httpx>=0.27
+pytest>=8
