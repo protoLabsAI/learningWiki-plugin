@@ -4,6 +4,9 @@ Two ledgers, one loop: an LLM-maintained wiki of concept pages (the content
 model) plus a learner ledger of strengths/misconceptions/cards (the learner
 model). Only retrieval events move strength. register() is the only place
 plugin code runs; host-only imports stay lazy so the test suite runs host-free.
+
+Seam usage is documented seam-by-seam (used AND deliberately skipped) in
+SEAMS.md — this plugin doubles as a plugin-SDK reference.
 """
 
 from __future__ import annotations
@@ -54,6 +57,42 @@ def _reset_store_for_tests() -> None:
     _STORE = None
 
 
+REVIEW_CRON_PROMPT = (
+    "Scheduled review pass: task the review-coach subagent to run one spaced-repetition "
+    "session over the due cards and relay its session. If it reports no cards due, reply "
+    "with a single short line."
+)
+
+LINT_CRON_PROMPT = (
+    "Scheduled wiki lint: task the wiki-lint subagent (read-only) and relay its report. "
+    "Do not apply fixes unless the operator asks."
+)
+
+
+def _arm_crons(cfg: dict) -> None:
+    """Plugin-owned recurring jobs (ADR 0054 pattern): a scheduled job fires a normal
+    agent turn — no new scheduling machinery. Idempotent by job id; the loader sweeps
+    `plugin:learning_wiki:*` jobs on disable/uninstall (#1642)."""
+    jobs = []
+    if cfg.get("review_cron"):
+        jobs.append(("review-session", str(cfg["review_cron"]), REVIEW_CRON_PROMPT))
+    if cfg.get("lint_cron"):
+        jobs.append(("wiki-lint", str(cfg["lint_cron"]), LINT_CRON_PROMPT))
+    if not jobs:
+        return
+    try:
+        from graph.sdk import schedule_recurring  # host-only, lazy
+    except ImportError:
+        log.info("[learning_wiki] scheduler unavailable (no host) — crons not armed")
+        return
+    for job_id, cron, prompt in jobs:
+        try:
+            schedule_recurring(prompt, cron, plugin_id="learning_wiki", job_id=job_id)
+            log.info("[learning_wiki] armed cron %s (%s)", job_id, cron)
+        except Exception:  # noqa: BLE001
+            log.exception("[learning_wiki] arming cron %s failed", job_id)
+
+
 def register(registry) -> None:
     cfg = registry.config or {}
     get_store = _make_get_store(cfg)
@@ -68,6 +107,7 @@ def register(registry) -> None:
         log.exception("[learning_wiki] mounting routers failed")
 
     # 2. Review-nudge surface (inert unless nudge_interval_hours > 0).
+    nudge = None
     try:
         from .nudge import ReviewNudge
 
@@ -90,5 +130,47 @@ def register(registry) -> None:
         registry.register_skill_dir("skills")
     except Exception:  # noqa: BLE001
         log.exception("[learning_wiki] registering skills failed")
+
+    # 5. Subagents: review-coach (scheduled sessions) + wiki-lint (read-only curation).
+    try:
+        from .subagents import build_subagents
+
+        for sub in build_subagents():
+            registry.register_subagent(sub)
+    except Exception:  # noqa: BLE001
+        log.exception("[learning_wiki] registering subagents failed")
+
+    # 6. Ledger-verified learning goals: verifiers for /goal + watches, and a
+    #    watch hook that retires a /learn study cadence once its target is met.
+    try:
+        from .goals import build_verifiers, make_on_watch_met
+
+        if hasattr(registry, "register_goal_verifier"):
+            for name, fn in build_verifiers(get_store):
+                registry.register_goal_verifier(name, fn)
+        if hasattr(registry, "register_watch_hook"):
+            registry.register_watch_hook(on_met=make_on_watch_met(getattr(registry, "emit", None)))
+    except Exception:  # noqa: BLE001
+        log.exception("[learning_wiki] registering goal seams failed")
+
+    # 7. User-only control commands: /review, /wiki, /learn.
+    try:
+        from .commands import build_commands
+
+        if hasattr(registry, "register_chat_command"):
+            for name, handler in build_commands(cfg, get_store).items():
+                registry.register_chat_command(name, handler)
+    except Exception:  # noqa: BLE001
+        log.exception("[learning_wiki] registering chat commands failed")
+
+    # 8. Lifecycle: desktop wake → due check (the rail dot lights via reviews_due).
+    try:
+        if nudge is not None and hasattr(registry, "register_lifecycle_hook"):
+            registry.register_lifecycle_hook(on_system_wake=lambda *a, **k: nudge.check_once())
+    except Exception:  # noqa: BLE001
+        log.exception("[learning_wiki] registering lifecycle hook failed")
+
+    # 9. Plugin-owned crons: scheduled review sessions + weekly lint.
+    _arm_crons(cfg)
 
     log.info("[learning_wiki] registered")

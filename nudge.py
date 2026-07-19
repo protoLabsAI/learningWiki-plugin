@@ -22,6 +22,12 @@ class ReviewNudge:
 
     def check_once(self) -> int:
         due = self._get_store().due_count()
+        try:
+            from graph.sdk import record_metric  # host-only, lazy; best-effort
+
+            record_metric("due_cards", float(due), plugin_id="learning_wiki")
+        except Exception:  # noqa: BLE001 — metrics never gate the nudge
+            pass
         if due > 0 and self._emit is not None:
             try:
                 self._emit("reviews_due", {"due": due})

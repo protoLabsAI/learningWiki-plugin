@@ -3,7 +3,7 @@
 # (tests/test_packaging.py enforces it).
 id: learning_wiki
 name: Learning Wiki (wiki + learner ledger + spaced review)
-version: 0.1.0
+version: 0.2.0
 description: >-
   An adaptive learning wiki: the agent maintains a persistent, interlinked wiki
   of concept pages (Karpathy's LLM-wiki pattern) PLUS a learner ledger — per-concept
@@ -20,6 +20,7 @@ description: >-
   Ships DISABLED; enable with `plugins: { enabled: [learning_wiki] }`.
 enabled: false
 repository: https://github.com/protoLabsAI/learningWiki-plugin
+guide_url: https://github.com/protoLabsAI/learningWiki-plugin#install--enable
 min_protoagent_version: "0.34.0"
 
 config_section: learning_wiki
@@ -29,12 +30,39 @@ config:
   fsrs_weights: []          # 17 floats overriding the FSRS-4.5 defaults (empty = published defaults)
   nudge_interval_hours: 0   # >0 = background surface checks due cards every N hours
                             # and emits `learning_wiki.reviews_due`; 0 = surface inert
+  study_cron: "0 9 * * *"   # cadence a /learn goal studies on (per-topic job, self-cancelling)
+  review_cron: ""           # non-empty cron = scheduled review sessions via the review-coach subagent
+  lint_cron: ""             # non-empty cron = scheduled read-only wiki-lint pass (e.g. "0 7 * * 1")
   rh_enabled: false         # opt-in: wiki_research tool shells out to the rabbit-hole `rh` CLI
   rh_bin: rh                # rh binary (or set an absolute path)
   rh_timeout_s: 300         # subprocess timeout for `rh research`
 
+# Rendered in the console Settings dialog for this plugin (ADR 0019).
+settings:
+  - { key: desired_retention, label: "Desired retention (FSRS target)", type: number }
+  - { key: study_cron, label: "Study-tick cron for /learn goals", type: string }
+  - { key: review_cron, label: "Scheduled review cron (empty = off)", type: string }
+  - { key: lint_cron, label: "Wiki-lint cron (empty = off)", type: string }
+  - { key: nudge_interval_hours, label: "Due-card nudge interval, hours (0 = off)", type: number }
+
 views:
   - { id: wiki, label: "Wiki", icon: BookOpen, path: /plugins/learning_wiki/view }
+
+# Typed event contracts (#1636). Any topic under `learning_wiki.*` also lights
+# the Wiki rail icon's notification dot until the surface is opened.
+emits:
+  - topic: reviews_due
+    summary: Spaced-review cards are due
+    schema:
+      type: object
+      properties: { due: { type: integer } }
+      required: [due]
+  - topic: goal_achieved
+    summary: A /learn goal reached its target strength; its study cadence was cancelled
+    schema:
+      type: object
+      properties: { slug: { type: string } }
+      required: [slug]
 
 # Declarative transparency. Network is [] because the plugin itself opens no
 # sockets; enabling `rh_enabled` delegates web access to the external rh CLI

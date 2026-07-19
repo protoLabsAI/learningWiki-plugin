@@ -42,7 +42,33 @@ def test_view_declared_on_public_prefix():
 
 def test_config_defaults_present():
     cfg = _manifest()["config"]
-    for key in ("data_dir", "desired_retention", "fsrs_weights", "nudge_interval_hours", "rh_enabled"):
+    for key in (
+        "data_dir",
+        "desired_retention",
+        "fsrs_weights",
+        "nudge_interval_hours",
+        "study_cron",
+        "review_cron",
+        "lint_cron",
+        "rh_enabled",
+    ):
         assert key in cfg
     assert cfg["rh_enabled"] is False
     assert cfg["nudge_interval_hours"] == 0
+    assert cfg["review_cron"] == "" and cfg["lint_cron"] == ""  # push halves are opt-in
+
+
+def test_settings_schema_covers_the_tunables():
+    keys = {s["key"] for s in _manifest()["settings"]}
+    assert {"desired_retention", "study_cron", "review_cron", "lint_cron", "nudge_interval_hours"} <= keys
+
+
+def test_typed_event_contracts():
+    emits = {e["topic"]: e for e in _manifest()["emits"]}
+    assert set(emits) == {"reviews_due", "goal_achieved"}
+    assert emits["reviews_due"]["schema"]["required"] == ["due"]
+    assert emits["goal_achieved"]["schema"]["required"] == ["slug"]
+
+
+def test_guide_url_points_at_readme():
+    assert "learningWiki-plugin#install" in _manifest()["guide_url"]

@@ -3,12 +3,17 @@
 Registers a synthetic package whose __path__ is the repo root, so the modules'
 relative imports (``from .store import ...``) resolve standalone. Executing
 ``__init__.py`` is safe because host-only imports live inside functions.
+
+``host_stub`` fakes the ``graph.*`` host modules (sdk / goals / subagents) so
+the host-gated seams (crons, verifiers, /learn) can be exercised and their
+calls asserted — still with no real host anywhere near the suite.
 """
 
 from __future__ import annotations
 
 import importlib.util
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -31,6 +36,11 @@ class FakeRegistry:
         self.routers: list = []
         self.surfaces: list = []
         self.skill_dirs: list = []
+        self.subagents: list = []
+        self.goal_verifiers: dict = {}
+        self.watch_hooks: list = []
+        self.lifecycle_hooks: list = []
+        self.chat_commands: dict = {}
         self.events: list = []
 
     def register_tool(self, t):
@@ -44,6 +54,23 @@ class FakeRegistry:
 
     def register_skill_dir(self, path):
         self.skill_dirs.append(path)
+
+    def register_subagent(self, cfg):
+        self.subagents.append(cfg)
+
+    def register_goal_verifier(self, name, fn):
+        self.goal_verifiers[name] = fn
+
+    def register_watch_hook(self, on_met=None, on_expired=None, on_stalled=None):
+        self.watch_hooks.append({"on_met": on_met, "on_expired": on_expired, "on_stalled": on_stalled})
+
+    def register_lifecycle_hook(self, on_app_loaded=None, on_agent_active=None, on_system_wake=None):
+        self.lifecycle_hooks.append(
+            {"on_app_loaded": on_app_loaded, "on_agent_active": on_agent_active, "on_system_wake": on_system_wake}
+        )
+
+    def register_chat_command(self, name, handler):
+        self.chat_commands[name] = handler
 
     def emit(self, topic, data):
         self.events.append((topic, data))
@@ -60,7 +87,7 @@ def store(tmp_path):
 
 @pytest.fixture
 def registry(tmp_path, monkeypatch):
-    """A registered plugin against an isolated tmp store."""
+    """A registered plugin against an isolated tmp store (no host stubs)."""
     import learning_wiki
 
     monkeypatch.setenv("LEARNING_WIKI_DIR", str(tmp_path))
@@ -68,6 +95,84 @@ def registry(tmp_path, monkeypatch):
     reg = FakeRegistry()
     learning_wiki.register(reg)
     yield reg
+    learning_wiki._reset_store_for_tests()
+
+
+@pytest.fixture
+def host_stub(monkeypatch):
+    """Fake graph.* modules; returns a call-capture dict."""
+    calls = {"scheduled": [], "cancelled": [], "watches": [], "metrics": []}
+
+    g = types.ModuleType("graph")
+    goals_pkg = types.ModuleType("graph.goals")
+    goal_types = types.ModuleType("graph.goals.types")
+
+    class VerifyResult:
+        def __init__(self, ok, detail="", value=""):
+            self.ok, self.detail, self.value = ok, detail, value
+
+    goal_types.VerifyResult = VerifyResult
+
+    sub_pkg = types.ModuleType("graph.subagents")
+    sub_cfg = types.ModuleType("graph.subagents.config")
+
+    class SubagentConfig:
+        def __init__(self, **kw):
+            self.__dict__.update(kw)
+
+    sub_cfg.SubagentConfig = SubagentConfig
+
+    sdk = types.ModuleType("graph.sdk")
+
+    def schedule_recurring(prompt, cron, *, plugin_id, job_id, session="", timezone=None):
+        calls["scheduled"].append({"prompt": prompt, "cron": cron, "plugin_id": plugin_id, "job_id": job_id})
+        return {"ok": True}
+
+    def cancel_scheduled(job_id, *, plugin_id):
+        calls["cancelled"].append({"job_id": job_id, "plugin_id": plugin_id})
+        return True
+
+    def create_watch(**kw):
+        calls["watches"].append(kw)
+        return {"ok": True, "watch_id": kw.get("watch_id", "")}
+
+    def record_metric(name, value, *, ts=None, plugin_id):
+        calls["metrics"].append((name, value, plugin_id))
+        return {}
+
+    sdk.schedule_recurring = schedule_recurring
+    sdk.cancel_scheduled = cancel_scheduled
+    sdk.create_watch = create_watch
+    sdk.record_metric = record_metric
+
+    g.goals = goals_pkg
+    g.subagents = sub_pkg
+    g.sdk = sdk
+    goals_pkg.types = goal_types
+    sub_pkg.config = sub_cfg
+
+    for name, mod in {
+        "graph": g,
+        "graph.goals": goals_pkg,
+        "graph.goals.types": goal_types,
+        "graph.subagents": sub_pkg,
+        "graph.subagents.config": sub_cfg,
+        "graph.sdk": sdk,
+    }.items():
+        monkeypatch.setitem(sys.modules, name, mod)
+    return calls
+
+
+@pytest.fixture
+def registry_hosted(tmp_path, monkeypatch, host_stub):
+    """Registered plugin WITH the fake host — subagents/crons/verifiers all live."""
+    import learning_wiki
+
+    monkeypatch.setenv("LEARNING_WIKI_DIR", str(tmp_path))
+    learning_wiki._reset_store_for_tests()
+    reg = FakeRegistry(config={"review_cron": "0 9 * * *", "lint_cron": "0 7 * * 1"})
+    learning_wiki.register(reg)
+    yield reg, host_stub
     learning_wiki._reset_store_for_tests()
 
 

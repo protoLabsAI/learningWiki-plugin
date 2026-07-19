@@ -12,6 +12,9 @@ events move strength.** Reading, filing, and hearing a great explanation never d
 — that's the fluency illusion, and it's designed out. Design + evidence base:
 [ADR 0001](./docs/adr/0001-learning-wiki.md).
 
+It is also a **plugin-SDK showcase**: every seam it uses (and every seam it
+deliberately declines) is documented in [SEAMS.md](./SEAMS.md).
+
 ## What it contributes
 
 - **12 tools** — `wiki_index` / `wiki_page` / `wiki_file` / `wiki_link` (content
@@ -25,10 +28,22 @@ events move strength.** Reading, filing, and hearing a great explanation never d
   (novice → worked examples, frontier → one-idea-per-tier generation, fluent →
   teach-back), answer-holding, plain-spoken correction, end-of-session filing +
   card generation *from the session*.
+- **Two subagents** — `review-coach` (one honest session over the due cards;
+  scheduled via `review_cron`) and `wiki-lint` (read-only curation pass:
+  orphans, stale strengths, frontier inconsistencies; `lint_cron`). Both ride
+  plugin-owned cron jobs that are swept automatically on disable.
+- **Chat commands** — `/review` (what's due), `/wiki [topic]` (page peek /
+  frontier), and `/learn <topic> [target]` — arms a **self-driving learning
+  loop**: a study cadence plus a ledger-verified watch
+  (`learning_wiki:strength`) that cancels the cadence when you actually reach
+  the target. Goal verifiers also work with `/goal`.
 - **Console view** — a "Wiki" rail icon: page list with tier dots + due badges,
-  page reader with `[[wikilink]]` navigation, links/backlinks.
-- **Review-nudge surface** — inert by default; with `nudge_interval_hours > 0` it
-  emits `learning_wiki.reviews_due` on the event bus when cards are due.
+  page reader with `[[wikilink]]` navigation, links/backlinks. Any
+  `learning_wiki.*` event lights its notification dot.
+- **Review-nudge surface + wake hook** — inert by default; with
+  `nudge_interval_hours > 0` it emits `learning_wiki.reviews_due` (typed
+  contract in the manifest) when cards are due, and a desktop wake triggers a
+  due check via the lifecycle-hook seam.
 
 Storage is instance-scoped SQLite (`instance_paths().store("learning_wiki")`),
 no runtime pip deps; the FSRS-4.5 scheduler is pure Python with the published

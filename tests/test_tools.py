@@ -28,6 +28,32 @@ def test_register_contributes_everything(registry):
     assert prefixes == ["/plugins/learning_wiki", "/api/plugins/learning_wiki"]
     assert registry.surfaces[0]["name"] == "learning-wiki-nudge"
     assert registry.skill_dirs == ["skills"]
+    # Host-gated seams degrade cleanly with no host: verifiers/hooks/commands
+    # register (pure closures); subagents need the host's SubagentConfig.
+    assert set(registry.goal_verifiers) == {"strength", "reviews_clear"}
+    assert len(registry.watch_hooks) == 1
+    assert registry.lifecycle_hooks[0]["on_system_wake"] is not None
+    assert set(registry.chat_commands) == {"review", "wiki", "learn"}
+    assert registry.subagents == []
+
+
+def test_hosted_register_arms_crons_and_subagents(registry_hosted):
+    reg, calls = registry_hosted
+    assert [s.name for s in reg.subagents] == ["review-coach", "wiki-lint"]
+    jobs = {j["job_id"]: j["cron"] for j in calls["scheduled"]}
+    assert jobs == {"review-session": "0 9 * * *", "wiki-lint": "0 7 * * 1"}
+    assert all(j["plugin_id"] == "learning_wiki" for j in calls["scheduled"])
+
+
+def test_lifecycle_wake_hook_checks_due_and_records_metric(registry_hosted):
+    reg, calls = registry_hosted
+    from conftest import tool_by_name
+
+    tool_by_name(reg, "card_add").invoke({"slug": "a", "prompt": "q?"})
+    reg.lifecycle_hooks[0]["on_system_wake"]()
+    # the raw topic — the HOST registry namespaces it to learning_wiki.reviews_due
+    assert ("reviews_due", {"due": 1}) in reg.events
+    assert calls["metrics"][-1] == ("due_cards", 1.0, "learning_wiki")
 
 
 def test_every_tool_has_a_description(registry):
