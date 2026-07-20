@@ -118,7 +118,7 @@ def registry(tmp_path, monkeypatch):
 @pytest.fixture
 def host_stub(monkeypatch):
     """Fake graph.* modules; returns a call-capture dict."""
-    calls = {"scheduled": [], "cancelled": [], "watches": [], "metrics": []}
+    calls = {"scheduled": [], "cancelled": [], "watches": [], "metrics": [], "loops": [], "stopped_loops": []}
 
     g = types.ModuleType("graph")
     goals_pkg = types.ModuleType("graph.goals")
@@ -177,12 +177,30 @@ def host_stub(monkeypatch):
         calls["knob_prefix"] = prefix
         return []
 
+    def start_goal_loop(**kw):
+        calls["loops"].append(kw)
+        return {
+            "ok": True,
+            "goal": kw.get("goal", ""),
+            "loop_id": kw.get("loop_id", ""),
+            "watch_id": f"{kw.get('plugin_id', '')}:goal-loop:{kw.get('loop_id', '')}",
+            "job_id": f"plugin:{kw.get('plugin_id', '')}:{kw.get('loop_id', '')}",
+            "schedule": kw.get("every", ""),
+            "message": "armed",
+        }
+
+    def stop_goal_loop(*, plugin_id, loop_id):
+        calls["stopped_loops"].append({"plugin_id": plugin_id, "loop_id": loop_id})
+        return {"ok": True}
+
     sdk.schedule_recurring = schedule_recurring
     sdk.cancel_scheduled = cancel_scheduled
     sdk.create_watch = create_watch
     sdk.record_metric = record_metric
     sdk.Knobs = Knobs
     sdk.make_knob_tools = make_knob_tools
+    sdk.start_goal_loop = start_goal_loop
+    sdk.stop_goal_loop = stop_goal_loop
 
     g.goals = goals_pkg
     g.subagents = sub_pkg

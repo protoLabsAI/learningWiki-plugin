@@ -3,15 +3,16 @@
 Chat commands are deliberately NOT agent tools — the model cannot invoke them.
 That makes them the right home for the two control actions here: peeking at
 state (/wiki, /review) and arming the self-driving learning loop (/learn),
-which composes schedule_recurring + create_watch and needs the session_id the
-command handler receives.
+which needs the session_id the command handler receives. /learn prefers the
+host's one-call `start_goal_loop` (protoAgent #2061) and composes the identical
+loop from schedule_recurring + create_watch on hosts that predate it.
 """
 
 from __future__ import annotations
 
 import logging
 
-from .goals import GOAL_WATCH_PREFIX, STUDY_JOB_PREFIX
+from .goals import GOAL_WATCH_PREFIX, LOOP_PREFIX, STUDY_JOB_PREFIX
 from .store import slugify, tier
 
 log = logging.getLogger("protoagent.plugins.learning_wiki")
@@ -61,9 +62,10 @@ def build_commands(cfg: dict, get_store):
         return f"{head}\n\n{body}\n\n**Links:** {links}"
 
     async def learn_command(rest: str, session_id: str):
-        """/learn <topic> [target] — arm the self-driving loop: a study cadence
-        (schedule_recurring) plus a ledger-verified watch (create_watch) that
-        cancels the cadence when the target strength is reached."""
+        """/learn <topic> [target] — arm the self-driving loop. Prefers the host's
+        one-call `start_goal_loop` (protoAgent #2061: watch + tick under a shared
+        id, idempotent, rolled back together); on older hosts it composes the
+        same loop by hand from schedule_recurring + create_watch."""
         parts = rest.strip().split()
         if not parts:
             return "Usage: `/learn <topic> [target-strength 0..1]` — e.g. `/learn simpsons paradox 0.8`"
@@ -80,35 +82,63 @@ def build_commands(cfg: dict, get_store):
         slug = slugify(topic)
         get_store().ensure_page(slug, title=topic.title())
         cron = str(cfg.get("study_cron") or "0 9 * * *")
+        study_prompt = (
+            f"Scheduled study tick for '{slug}': run a SHORT session per the learning-tutor "
+            f"skill — reviews on this concept first, then one scaffolded tier. Target "
+            f"strength {target}. Check ledger_status('{slug}') and stop early if already there."
+        )
+        done_prompt = (
+            f"The learning goal on '{slug}' just PASSED verification (strength ≥ {target}). "
+            f"Congratulate the learner concretely, file a short progress note on the page "
+            f"(wiki_file, source_kind=chat), and suggest the natural next concept from its links."
+        )
         try:
-            from graph.sdk import create_watch, schedule_recurring  # host-only, lazy
+            try:
+                from graph.sdk import start_goal_loop  # one-call loop, protoAgent #2061+
+            except ImportError:
+                start_goal_loop = None
 
-            schedule_recurring(
-                (
-                    f"Scheduled study tick for '{slug}': run a SHORT session per the learning-tutor "
-                    f"skill — reviews on this concept first, then one scaffolded tier. Target "
-                    f"strength {target}. Check ledger_status('{slug}') and stop early if already there."
-                ),
-                cron,
-                plugin_id="learning_wiki",
-                job_id=f"{STUDY_JOB_PREFIX}{slug}",
-                session=session_id or "",
-            )
-            watch = create_watch(
-                condition=f"'{slug}' reaches strength {target}",
-                verifier="learning_wiki:strength",
-                verifier_args={"slug": slug, "min": target},
-                watch_id=f"{GOAL_WATCH_PREFIX}{slug}",
-                interval_s=WATCH_INTERVAL_S,
-                run_prompt=(
-                    f"The learning goal on '{slug}' just PASSED verification (strength ≥ {target}). "
-                    f"Congratulate the learner concretely, file a short progress note on the page "
-                    f"(wiki_file, source_kind=chat), and suggest the natural next concept from its links."
-                ),
-                run_session=session_id or "",
-            )
-            if not (watch or {}).get("ok", True):
-                return f"Study cadence armed (`{cron}`), but the watch was refused: {watch.get('message', 'unknown')}."
+            if start_goal_loop is not None:
+                res = start_goal_loop(
+                    goal=f"'{slug}' reaches strength {target}",
+                    verifier="learning_wiki:strength",
+                    verifier_args={"slug": slug, "min": target},
+                    every=cron,
+                    prompt=study_prompt,
+                    plugin_id="learning_wiki",
+                    loop_id=f"{LOOP_PREFIX}{slug}",
+                    session_id=session_id or "",
+                    done_prompt=done_prompt if session_id else "",
+                    interval_s=WATCH_INTERVAL_S,
+                )
+                if not (res or {}).get("ok", False):
+                    return f"Could not arm the loop: {(res or {}).get('message', 'unknown')}"
+                armed_via = "host goal loop (`start_goal_loop`, one call — re-running `/learn` replaces it)"
+            else:
+                # Older host: compose the identical loop from the two primitives.
+                from graph.sdk import create_watch, schedule_recurring  # host-only, lazy
+
+                schedule_recurring(
+                    study_prompt,
+                    cron,
+                    plugin_id="learning_wiki",
+                    job_id=f"{STUDY_JOB_PREFIX}{slug}",
+                    session=session_id or "",
+                )
+                watch = create_watch(
+                    condition=f"'{slug}' reaches strength {target}",
+                    verifier="learning_wiki:strength",
+                    verifier_args={"slug": slug, "min": target},
+                    watch_id=f"{GOAL_WATCH_PREFIX}{slug}",
+                    interval_s=WATCH_INTERVAL_S,
+                    run_prompt=done_prompt,
+                    run_session=session_id or "",
+                )
+                if not (watch or {}).get("ok", True):
+                    return (
+                        f"Study cadence armed (`{cron}`), but the watch was refused: {watch.get('message', 'unknown')}."
+                    )
+                armed_via = "composed cron + watch (host predates `start_goal_loop`)"
         except ImportError:
             return "The goal loop needs the protoAgent host (graph.sdk) — running standalone?"
         except Exception as e:  # noqa: BLE001
@@ -119,6 +149,7 @@ def build_commands(cfg: dict, get_store):
             f"**Learning loop armed for `{slug}`** — now {tier(current['strength'])} ({current['strength']:.2f}), "
             f"target {target}.\n- Study tick: `{cron}` (cancels itself at target)\n"
             f"- Verifier: `learning_wiki:strength` checks the ledger every {int(WATCH_INTERVAL_S / 3600)}h\n"
+            f"- Armed via: {armed_via}\n"
             f"Only real retrieval moves the number — the schedule does the remembering."
         )
 

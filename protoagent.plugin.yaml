@@ -3,7 +3,7 @@
 # (tests/test_packaging.py enforces it).
 id: learning_wiki
 name: Learning Wiki
-version: 0.3.0
+version: 0.3.1
 description: >-
   An adaptive learning wiki: the agent maintains a persistent, interlinked wiki
   of concept pages (Karpathy's LLM-wiki pattern) PLUS a learner ledger — per-concept

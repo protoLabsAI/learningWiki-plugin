@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 
 from learning_wiki.commands import build_commands
-from learning_wiki.goals import GOAL_WATCH_PREFIX, STUDY_JOB_PREFIX
+from learning_wiki.goals import GOAL_WATCH_PREFIX, LOOP_PREFIX, STUDY_JOB_PREFIX
 
 
 def _cmds(store, cfg=None):
@@ -46,28 +46,44 @@ def test_learn_usage_and_host_free_degradation(store):
     assert "needs the protoAgent host" in out
 
 
-def test_learn_arms_cron_and_watch(store, host_stub):
+def test_learn_prefers_one_call_loop_on_modern_host(store, host_stub):
     cmds = _cmds(store, cfg={"study_cron": "0 8 * * *"})
     out = _run(cmds["learn"]("bayes theorem 0.8", "session-42"))
-    assert "Learning loop armed" in out and "bayes-theorem" in out
+    assert "Learning loop armed" in out and "start_goal_loop" in out
 
-    job = host_stub["scheduled"][0]
-    assert job["job_id"] == f"{STUDY_JOB_PREFIX}bayes-theorem"
-    assert job["cron"] == "0 8 * * *" and job["plugin_id"] == "learning_wiki"
-
-    watch = host_stub["watches"][0]
-    assert watch["watch_id"] == f"{GOAL_WATCH_PREFIX}bayes-theorem"
-    assert watch["verifier"] == "learning_wiki:strength"
-    assert watch["verifier_args"] == {"slug": "bayes-theorem", "min": 0.8}
-    assert watch["run_session"] == "session-42"
-
+    loop = host_stub["loops"][0]
+    assert loop["loop_id"] == f"{LOOP_PREFIX}bayes-theorem"
+    assert loop["plugin_id"] == "learning_wiki"
+    assert loop["every"] == "0 8 * * *"
+    assert loop["verifier"] == "learning_wiki:strength"
+    assert loop["verifier_args"] == {"slug": "bayes-theorem", "min": 0.8}
+    assert loop["session_id"] == "session-42" and loop["done_prompt"]
+    # the sugar owns both halves — nothing composed by hand
+    assert host_stub["scheduled"] == [] and host_stub["watches"] == []
     # the stub page exists so the verifier has ground truth from day one
     assert store.get_page("bayes-theorem") is not None
+
+
+def test_learn_falls_back_to_composition_on_older_host(store, host_stub, monkeypatch):
+    import sys
+
+    monkeypatch.delattr(sys.modules["graph.sdk"], "start_goal_loop")
+    cmds = _cmds(store, cfg={"study_cron": "0 8 * * *"})
+    out = _run(cmds["learn"]("bayes theorem 0.8", "session-42"))
+    assert "Learning loop armed" in out and "predates" in out
+
+    assert host_stub["loops"] == []
+    job = host_stub["scheduled"][0]
+    assert job["job_id"] == f"{STUDY_JOB_PREFIX}bayes-theorem"
+    watch = host_stub["watches"][0]
+    assert watch["watch_id"] == f"{GOAL_WATCH_PREFIX}bayes-theorem"
+    assert watch["verifier_args"] == {"slug": "bayes-theorem", "min": 0.8}
+    assert watch["run_session"] == "session-42"
 
 
 def test_learn_target_defaults_and_bad_target_treated_as_topic(store, host_stub):
     cmds = _cmds(store)
     _run(cmds["learn"]("fsrs", "s1"))
-    assert host_stub["watches"][0]["verifier_args"]["min"] == 0.75
+    assert host_stub["loops"][0]["verifier_args"]["min"] == 0.75
     _run(cmds["learn"]("chapter 7", "s1"))  # trailing int 7 > 1.0 → part of the topic
-    assert host_stub["watches"][1]["verifier_args"]["slug"] == "chapter-7"
+    assert host_stub["loops"][1]["verifier_args"]["slug"] == "chapter-7"

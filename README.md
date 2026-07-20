@@ -39,8 +39,10 @@ deliberately declines) is documented in [SEAMS.md](./SEAMS.md).
 - **Chat commands** — `/review` (what's due), `/wiki [topic]` (page peek /
   frontier), and `/learn <topic> [target]` — arms a **self-driving learning
   loop**: a study cadence plus a ledger-verified watch
-  (`learning_wiki:strength`) that cancels the cadence when you actually reach
-  the target. Goal verifiers also work with `/goal`.
+  (`learning_wiki:strength`) that retires itself when you actually reach the
+  target. Uses the host's one-call `start_goal_loop` when present (protoAgent
+  #2061), composing the identical loop from `schedule_recurring` +
+  `create_watch` on older hosts. Goal verifiers also work with `/goal`.
 - **A2A card skills** — `learning_status` (structured ledger snapshot) and
   `quiz_me` (due prompts, answers withheld) let other fleet agents query your
   frontier over A2A and get schema-enforced JSON back.

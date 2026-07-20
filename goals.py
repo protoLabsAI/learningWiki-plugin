@@ -16,6 +16,12 @@ log = logging.getLogger("protoagent.plugins.learning_wiki")
 STUDY_JOB_PREFIX = "study-"
 GOAL_WATCH_PREFIX = "learning-wiki-goal-"
 
+# start_goal_loop (protoAgent #2061) ids: loop "learn-<slug>", watch
+# "<plugin_id>:goal-loop:<loop_id>". The legacy prefixes above stay recognized
+# so loops armed by the composed fallback still retire.
+LOOP_PREFIX = "learn-"
+SUGAR_WATCH_PREFIX = "learning_wiki:goal-loop:"
+
 
 def build_verifiers(get_store):
     """Return [(name, async_verifier)] — names get namespaced `learning_wiki:<name>`."""
@@ -61,26 +67,40 @@ def make_on_watch_met(emitter=None):
                 v = getattr(c, key, None)
                 if isinstance(v, str):
                     return v
-            if isinstance(c, str) and c.startswith(GOAL_WATCH_PREFIX):
+            if isinstance(c, str) and c.startswith((GOAL_WATCH_PREFIX, SUGAR_WATCH_PREFIX)):
                 return c
         return ""
 
-    def on_met(*args, **kwargs):
-        wid = _watch_id(args, kwargs)
-        if not wid.startswith(GOAL_WATCH_PREFIX):
-            return  # not one of ours
-        slug = wid[len(GOAL_WATCH_PREFIX) :]
-        try:
-            from graph.sdk import cancel_scheduled  # host-only, lazy
-
-            cancel_scheduled(f"{STUDY_JOB_PREFIX}{slug}", plugin_id="learning_wiki")
-        except Exception:  # noqa: BLE001
-            log.exception("[learning_wiki] cancelling study job for %s failed", slug)
+    def _emit_achieved(slug: str) -> None:
         if emitter is not None:
             try:
                 emitter("goal_achieved", {"slug": slug})
             except Exception:  # noqa: BLE001
                 log.exception("[learning_wiki] emitting goal_achieved failed")
         log.info("[learning_wiki] learning goal met for %s — study cadence cancelled", slug)
+
+    def on_met(*args, **kwargs):
+        wid = _watch_id(args, kwargs)
+        if wid.startswith(SUGAR_WATCH_PREFIX):
+            # start_goal_loop-armed: one call tears down both halves (watch + tick).
+            loop_id = wid[len(SUGAR_WATCH_PREFIX) :]
+            try:
+                from graph.sdk import stop_goal_loop  # host-only, lazy
+
+                stop_goal_loop(plugin_id="learning_wiki", loop_id=loop_id)
+            except Exception:  # noqa: BLE001
+                log.exception("[learning_wiki] stopping goal loop %s failed", loop_id)
+            _emit_achieved(loop_id[len(LOOP_PREFIX) :] if loop_id.startswith(LOOP_PREFIX) else loop_id)
+            return
+        if wid.startswith(GOAL_WATCH_PREFIX):
+            # Composed-fallback-armed: cancel the study cron ourselves.
+            slug = wid[len(GOAL_WATCH_PREFIX) :]
+            try:
+                from graph.sdk import cancel_scheduled  # host-only, lazy
+
+                cancel_scheduled(f"{STUDY_JOB_PREFIX}{slug}", plugin_id="learning_wiki")
+            except Exception:  # noqa: BLE001
+                log.exception("[learning_wiki] cancelling study job for %s failed", slug)
+            _emit_achieved(slug)
 
     return on_met

@@ -5,7 +5,14 @@ from __future__ import annotations
 
 import asyncio
 
-from learning_wiki.goals import GOAL_WATCH_PREFIX, STUDY_JOB_PREFIX, build_verifiers, make_on_watch_met
+from learning_wiki.goals import (
+    GOAL_WATCH_PREFIX,
+    LOOP_PREFIX,
+    STUDY_JOB_PREFIX,
+    SUGAR_WATCH_PREFIX,
+    build_verifiers,
+    make_on_watch_met,
+)
 
 
 def _run(coro):
@@ -46,6 +53,15 @@ def test_watch_hook_cancels_study_job_and_emits(host_stub):
     on_met = make_on_watch_met(emitter=lambda t, d: events.append((t, d)))
     on_met({"watch_id": f"{GOAL_WATCH_PREFIX}bayes"})
     assert host_stub["cancelled"] == [{"job_id": f"{STUDY_JOB_PREFIX}bayes", "plugin_id": "learning_wiki"}]
+    assert events == [("goal_achieved", {"slug": "bayes"})]
+
+
+def test_watch_hook_tears_down_sugar_loops_via_stop_goal_loop(host_stub):
+    events = []
+    on_met = make_on_watch_met(emitter=lambda t, d: events.append((t, d)))
+    on_met({"watch_id": f"{SUGAR_WATCH_PREFIX}{LOOP_PREFIX}bayes"})
+    assert host_stub["stopped_loops"] == [{"plugin_id": "learning_wiki", "loop_id": f"{LOOP_PREFIX}bayes"}]
+    assert host_stub["cancelled"] == []  # the sugar owns the tick — no hand-cancel
     assert events == [("goal_achieved", {"slug": "bayes"})]
 
 
