@@ -52,3 +52,19 @@ def test_cap_limits_nodes_and_due_badges_render():
 def test_titles_are_escaped():
     svg = render_map([_page("x") | {"title": 'a<b>&"c'}], [])
     assert "<b>" not in svg and "&amp;" in svg
+
+
+def test_long_titles_wrap_instead_of_truncating():
+    svg = render_map([_page("x") | {"title": "Agent Failure Modes (Overview)"}], [])
+    # Wrapped onto a second tspan line, nothing chopped mid-title.
+    assert 'dy="13">(Overview)</tspan>' in svg
+    assert "Agent Failure Modes" in svg
+    assert "…" not in svg
+    # Full title available as a hover tooltip on the node.
+    assert "<title>Agent Failure Modes (Overview)</title>" in svg
+
+
+def test_short_titles_stay_single_line():
+    svg = render_map([_page("x") | {"title": "Softmax"}], [])
+    assert 'dy="13"' not in svg
+    assert ">Softmax<" in svg

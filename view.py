@@ -127,6 +127,19 @@ PAGE = r"""<!doctype html>
     return out.join("\n");
   }
 
+  // The reader renders page.title as its own heading, and filed pages usually
+  // open with the same text as an H1 — drop that leading H1 when it matches,
+  // so titles don't render twice. A deliberately different H1 is kept.
+  function stripDupTitle(src, title){
+    const lines = String(src || "").split("\n");
+    let i = 0;
+    while (i < lines.length && lines[i].trim() === "") i++;
+    const m = (lines[i] || "").match(/^#\s+(.*)$/);
+    if (m && m[1].trim().toLowerCase() === String(title || "").trim().toLowerCase())
+      return lines.slice(i + 1).join("\n");
+    return src;
+  }
+
   async function api(path){
     // RULES 2+3 — gated data via the kit's slug-aware authed fetch.
     const r = await kit.apiFetch(path);
@@ -163,7 +176,7 @@ PAGE = r"""<!doctype html>
           ${mis.length ? `<span class="pill">⚠ ${mis.length} open misconception(s)</span>` : ""}
           <span>updated ${esc((page.updated_at || "").slice(0, 10))}</span>
         </div>
-        <div class="md"><h2>${esc(page.title)}</h2>${md(page.content_md || "*stub — nothing filed yet*")}</div>
+        <div class="md"><h2>${esc(page.title)}</h2>${md(stripDupTitle(page.content_md, page.title) || "*stub — nothing filed yet*")}</div>
         <div class="links">
           ${page.links.length ? `<div class="h">Links</div>` + page.links.map(linkRow).join(" ") : ""}
           ${page.backlinks.length ? `<div class="h" style="margin-top:8px">Referenced by</div>` + page.backlinks.map(linkRow).join(" ") : ""}

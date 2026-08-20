@@ -236,12 +236,12 @@ def build_tools(cfg: dict, get_store, registry=None):
             if format == "archive":
                 target = out_dir or str(_data_dir(cfg) / "export")
                 res = get_store().export_archive(Path(target) / "wiki-archive.json")
-                return _ok(**res)
+                return _ok(format="archive", **res)
             if format != "markdown":
                 return _err("format must be 'markdown' or 'archive'")
             target = out_dir or str(_data_dir(cfg) / "export")
             n = get_store().export_markdown(target)
-            return _ok(dir=target, files=n)
+            return _ok(format="markdown", dir=target, files=n)
         except Exception as e:  # noqa: BLE001
             return _err(e)
 
