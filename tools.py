@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+from pathlib import Path
 import shutil
 import subprocess
 
@@ -222,14 +223,39 @@ def build_tools(cfg: dict, get_store, registry=None):
             return _err(e)
 
     @tool
-    def wiki_export(out_dir: str = "") -> str:
-        """Export every wiki page as a markdown file with front-matter (title, kind, strength). Default target: <data_dir>/export. Returns the directory and file count."""
+    def wiki_export(out_dir: str = "", format: str = "markdown") -> str:
+        """Export the wiki. format="markdown" (default) writes one readable .md per
+        page (front-matter: title/kind/strength) — a reading copy. format="archive"
+        writes wiki-archive.json: EVERYTHING (pages, revisions, links, ledger,
+        FSRS card state, review log) as one versioned, slug-keyed file that
+        wiki_import can rebuild on another instance — the migration path.
+        Default target: <data_dir>/export."""
         try:
             from . import _data_dir
 
+            if format == "archive":
+                target = out_dir or str(_data_dir(cfg) / "export")
+                res = get_store().export_archive(Path(target) / "wiki-archive.json")
+                return _ok(**res)
+            if format != "markdown":
+                return _err("format must be 'markdown' or 'archive'")
             target = out_dir or str(_data_dir(cfg) / "export")
             n = get_store().export_markdown(target)
             return _ok(dir=target, files=n)
+        except Exception as e:  # noqa: BLE001
+            return _err(e)
+
+    @tool
+    def wiki_import(path: str, mode: str = "merge") -> str:
+        """Import a wiki-archive.json produced by wiki_export(format="archive") —
+        the migration path between instances. State lands VERBATIM (strength, FSRS
+        scheduling, review history are restored, not re-earned — an import is not
+        retrieval). mode="merge" (default) adds new pages and SKIPS slugs that
+        already exist here (reported); mode="replace" overwrites colliding pages
+        with the archive's version. Other pages are never touched."""
+        try:
+            res = get_store().import_archive(path, mode=mode)
+            return _ok(**res)
         except Exception as e:  # noqa: BLE001
             return _err(e)
 
@@ -269,5 +295,6 @@ def build_tools(cfg: dict, get_store, registry=None):
         review_grade,
         wiki_map,
         wiki_export,
+        wiki_import,
         wiki_research,
     ]

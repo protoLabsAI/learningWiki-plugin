@@ -470,6 +470,214 @@ class WikiStore:
             n += 1
         return n
 
+    # ── full-fidelity archive (migration between instances) ────────────────
+
+    ARCHIVE_FORMAT = "learning-wiki-archive"
+    ARCHIVE_VERSION = 1
+
+    def export_archive(self, path: str | Path) -> dict:
+        """Write EVERYTHING — pages, revisions, links, ledger, FSRS card state,
+        review log — as one versioned, id-free JSON archive keyed by slug, so an
+        import can rebuild it on any instance. This is the migration format;
+        ``export_markdown`` stays the human-readable reading copy."""
+        import json
+
+        out = Path(path).expanduser()
+        out.parent.mkdir(parents=True, exist_ok=True)
+        with self._lock:
+            pages = [dict(r) for r in self._conn.execute("SELECT * FROM pages ORDER BY slug")]
+            by_id = {p["id"]: p["slug"] for p in pages}
+            doc_pages = []
+            for pg in pages:
+                pid = pg["id"]
+                concept = self._conn.execute("SELECT * FROM concepts WHERE page_id = ?", (pid,)).fetchone()
+                revisions = [
+                    dict(r)
+                    for r in self._conn.execute(
+                        "SELECT content_md, change_summary, source_kind, source_ref, created_at "
+                        "FROM revisions WHERE page_id = ? ORDER BY id",
+                        (pid,),
+                    )
+                ]
+                cards = []
+                for c in self._conn.execute("SELECT * FROM cards WHERE page_id = ? ORDER BY id", (pid,)):
+                    reviews = [
+                        dict(r)
+                        for r in self._conn.execute(
+                            "SELECT rating, reviewed_at, interval_days FROM review_log WHERE card_id = ? ORDER BY id",
+                            (c["id"],),
+                        )
+                    ]
+                    card = {
+                        k: c[k]
+                        for k in (
+                            "prompt",
+                            "answer",
+                            "origin",
+                            "stability",
+                            "difficulty",
+                            "reps",
+                            "lapses",
+                            "state",
+                            "due",
+                            "last_review",
+                            "suspended",
+                            "created_at",
+                        )
+                    }
+                    card["reviews"] = reviews
+                    cards.append(card)
+                doc_pages.append(
+                    {
+                        **{
+                            k: pg[k]
+                            for k in ("slug", "title", "kind", "summary", "content_md", "created_at", "updated_at")
+                        },
+                        "concept": (
+                            {k: concept[k] for k in ("strength", "last_retrieved", "misconceptions", "evidence")}
+                            if concept
+                            else None
+                        ),
+                        "revisions": revisions,
+                        "cards": cards,
+                    }
+                )
+            links = [
+                {"from": by_id[r["from_page"]], "to": by_id[r["to_page"]], "rel": r["rel"]}
+                for r in self._conn.execute("SELECT * FROM links")
+                if r["from_page"] in by_id and r["to_page"] in by_id
+            ]
+        doc = {
+            "format": self.ARCHIVE_FORMAT,
+            "version": self.ARCHIVE_VERSION,
+            "exported_at": _now_iso(),
+            "pages": doc_pages,
+            "links": links,
+        }
+        out.write_text(json.dumps(doc, indent=1), encoding="utf-8")
+        return {
+            "path": str(out),
+            "pages": len(doc_pages),
+            "links": len(links),
+            "cards": sum(len(p["cards"]) for p in doc_pages),
+        }
+
+    def import_archive(self, path: str | Path, mode: str = "merge") -> dict:
+        """Restore an archive VERBATIM — raw inserts, never through
+        ``record_retrieval``/``grade``, so imported strength and FSRS state land
+        exactly as exported (the ledger invariant: only retrieval moves strength,
+        and an import is not retrieval). ``mode="merge"`` inserts new slugs and
+        SKIPS existing ones (reported); ``mode="replace"`` replaces any colliding
+        page (cascade wipes its old revisions/cards/logs/links) with the archive's
+        version. Other pages are never touched."""
+        import json
+
+        src = Path(path).expanduser()
+        doc = json.loads(src.read_text(encoding="utf-8"))
+        if doc.get("format") != self.ARCHIVE_FORMAT:
+            raise ValueError(f"not a learning-wiki archive: {src}")
+        if int(doc.get("version", 0)) > self.ARCHIVE_VERSION:
+            raise ValueError(f"archive version {doc.get('version')} is newer than this plugin understands")
+        if mode not in ("merge", "replace"):
+            raise ValueError("mode must be 'merge' or 'replace'")
+
+        imported, skipped = [], []
+        with self._lock, self._conn:
+            for pg in doc.get("pages", []):
+                slug = str(pg.get("slug") or "").strip()
+                if not slug:
+                    continue
+                existing = self._conn.execute("SELECT id FROM pages WHERE slug = ?", (slug,)).fetchone()
+                if existing is not None:
+                    if mode == "merge":
+                        skipped.append(slug)
+                        continue
+                    self._conn.execute("DELETE FROM pages WHERE id = ?", (existing["id"],))
+                cur = self._conn.execute(
+                    "INSERT INTO pages (slug, title, kind, summary, content_md, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        slug,
+                        pg.get("title") or slug,
+                        pg.get("kind") or "concept",
+                        pg.get("summary") or "",
+                        pg.get("content_md") or "",
+                        pg.get("created_at") or _now_iso(),
+                        pg.get("updated_at") or _now_iso(),
+                    ),
+                )
+                pid = cur.lastrowid
+                c = pg.get("concept")
+                if c:
+                    self._conn.execute(
+                        "INSERT INTO concepts (page_id, strength, last_retrieved, misconceptions, evidence) "
+                        "VALUES (?, ?, ?, ?, ?)",
+                        (
+                            pid,
+                            float(c.get("strength") or 0.0),
+                            c.get("last_retrieved"),
+                            c.get("misconceptions") or "[]",
+                            c.get("evidence") or "[]",
+                        ),
+                    )
+                for rv in pg.get("revisions", []):
+                    self._conn.execute(
+                        "INSERT INTO revisions (page_id, content_md, change_summary, source_kind, source_ref, created_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?)",
+                        (
+                            pid,
+                            rv.get("content_md") or "",
+                            rv.get("change_summary") or "",
+                            rv.get("source_kind") or "manual",
+                            rv.get("source_ref") or "",
+                            rv.get("created_at") or _now_iso(),
+                        ),
+                    )
+                for cd in pg.get("cards", []):
+                    ccur = self._conn.execute(
+                        "INSERT INTO cards (page_id, prompt, answer, origin, stability, difficulty, reps, "
+                        "lapses, state, due, last_review, suspended, created_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            pid,
+                            cd.get("prompt") or "",
+                            cd.get("answer") or "",
+                            cd.get("origin") or "restatement",
+                            float(cd.get("stability") or 0.0),
+                            float(cd.get("difficulty") or 0.0),
+                            int(cd.get("reps") or 0),
+                            int(cd.get("lapses") or 0),
+                            cd.get("state") or "new",
+                            cd.get("due") or _now_iso(),
+                            cd.get("last_review"),
+                            int(cd.get("suspended") or 0),
+                            cd.get("created_at") or _now_iso(),
+                        ),
+                    )
+                    for rv in cd.get("reviews", []):
+                        self._conn.execute(
+                            "INSERT INTO review_log (card_id, rating, reviewed_at, interval_days) VALUES (?, ?, ?, ?)",
+                            (
+                                ccur.lastrowid,
+                                int(rv.get("rating") or 0),
+                                rv.get("reviewed_at") or _now_iso(),
+                                float(rv.get("interval_days") or 0),
+                            ),
+                        )
+                imported.append(slug)
+            # Links resolve by slug AFTER all pages land (both endpoints must exist).
+            linked = 0
+            for ln in doc.get("links", []):
+                a = self._conn.execute("SELECT id FROM pages WHERE slug = ?", (ln.get("from"),)).fetchone()
+                b = self._conn.execute("SELECT id FROM pages WHERE slug = ?", (ln.get("to"),)).fetchone()
+                if a and b:
+                    self._conn.execute(
+                        "INSERT OR IGNORE INTO links (from_page, to_page, rel) VALUES (?, ?, ?)",
+                        (a["id"], b["id"], ln.get("rel") or "related"),
+                    )
+                    linked += 1
+        return {"imported": len(imported), "skipped": skipped, "links": linked, "mode": mode}
+
     def stats(self) -> dict:
         with self._lock:
             pages = self._conn.execute("SELECT COUNT(*) AS n FROM pages").fetchone()["n"]

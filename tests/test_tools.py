@@ -19,6 +19,7 @@ EXPECTED_TOOLS = {
     "review_grade",
     "wiki_map",
     "wiki_export",
+    "wiki_import",
     "wiki_research",
 }
 
