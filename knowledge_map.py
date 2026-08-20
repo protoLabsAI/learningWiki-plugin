@@ -24,8 +24,31 @@ PAD = 40
 R = 9
 
 
+LABEL_W = 26  # chars per label line; two lines fit inside ROW_H, then ellipsize
+LABEL_LINES = 2
+
+
 def _esc(s: str) -> str:
     return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+
+
+def _wrap_label(title: str, width: int = LABEL_W, max_lines: int = LABEL_LINES) -> list[str]:
+    """Word-wrap a node label to at most max_lines; only the last line ellipsizes."""
+    words = title.split()
+    lines: list[str] = []
+    cur = ""
+    for i, w in enumerate(words):
+        cand = (cur + " " + w).strip()
+        if len(cand) <= width or not cur:
+            cur = cand
+            continue
+        lines.append(cur)
+        cur = w
+        if len(lines) == max_lines - 1:
+            cur = " ".join(words[i:])
+            break
+    lines.append(cur)
+    return [ln if len(ln) <= width else ln[: width - 1] + "…" for ln in lines if ln]
 
 
 def _depths(slugs: list[str], links: list[dict]) -> dict[str, int]:
@@ -99,10 +122,16 @@ def render_map(pages: list[dict], links: list[dict], cap: int = MAP_CAP) -> str:
         x, y = pos[s]
         p = by_slug[s]
         fill = TIER_FILL.get(p["tier"], TIER_FILL["novice"])
-        title = p["title"][:22] + ("…" if len(p["title"]) > 22 else "")
-        parts.append(f'<circle cx="{x}" cy="{y}" r="{R}" fill="{fill}" fill-opacity="0.9"/>')
+        lines = _wrap_label(p["title"]) or [""]
+        parts.append(
+            f'<circle cx="{x}" cy="{y}" r="{R}" fill="{fill}" fill-opacity="0.9">'
+            f"<title>{_esc(p['title'])}</title></circle>"
+        )
         due = f' <tspan fill="{TIER_FILL["novice"]}">·{p["due_cards"]} due</tspan>' if p.get("due_cards") else ""
-        parts.append(f'<text x="{x + R + 6}" y="{y + 4}" fill="{TEXT}">{_esc(title)}{due}</text>')
+        tx = x + R + 6
+        ty = y + 4 if len(lines) == 1 else y - 2
+        tspans = "".join(f'<tspan x="{tx}" dy="13">{_esc(ln)}</tspan>' for ln in lines[1:])
+        parts.append(f'<text x="{tx}" y="{ty}" fill="{TEXT}">{_esc(lines[0])}{tspans}{due}</text>')
 
     parts.append("</svg>")
     return "\n".join(parts)
