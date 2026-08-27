@@ -3,7 +3,7 @@
 # (tests/test_packaging.py enforces it).
 id: learning_wiki
 name: Learning Wiki
-version: 0.3.3
+version: 0.3.4
 description: >-
   An adaptive learning wiki: the agent maintains a persistent, interlinked wiki
   of concept pages (Karpathy's LLM-wiki pattern) PLUS a learner ledger — per-concept
@@ -21,11 +21,11 @@ description: >-
 enabled: false
 repository: https://github.com/protoLabsAI/learningWiki-plugin
 guide_url: https://github.com/protoLabsAI/learningWiki-plugin#install--enable
-min_protoagent_version: "0.34.0"
+min_protoagent_version: "0.148.0"  # sdk.plugin_store
 
 config_section: learning_wiki
 config:
-  data_dir: ""              # override the store dir; default = instance_paths().store("learning_wiki")
+  data_dir: ""              # override the store dir; default = this instance's plugin store
   desired_retention: 0.9    # FSRS target retrievability at review time (0.7–0.97 sane)
   fsrs_weights: []          # 17 floats overriding the FSRS-4.5 defaults (empty = published defaults)
   nudge_interval_hours: 0   # >0 = background surface checks due cards every N hours
