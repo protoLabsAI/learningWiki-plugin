@@ -29,7 +29,13 @@ def _data_dir(cfg: dict) -> Path:
         # manifest's v0.148 floor guarantees this seam in a real host.
         from graph import sdk
 
-        p = sdk.plugin_store(plugin_id="learning_wiki")
+        try:
+            p = sdk.plugin_store(plugin_id="learning_wiki")
+        except Exception as exc:
+            raise RuntimeError("learning_wiki requires an available instance-scoped plugin store") from exc
+        if p is None:
+            raise RuntimeError("learning_wiki received no instance-scoped plugin store")
+        p = Path(p)
     p.mkdir(parents=True, exist_ok=True)
     return p
 

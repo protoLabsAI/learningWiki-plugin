@@ -3,6 +3,8 @@ from __future__ import annotations
 import sys
 import types
 
+import pytest
+
 import learning_wiki
 
 
@@ -24,6 +26,26 @@ def test_default_store_comes_from_the_plugin_sdk(monkeypatch, tmp_path):
 
     assert learning_wiki._data_dir({}) == tmp_path
     assert calls == ["learning_wiki"]
+
+
+@pytest.mark.parametrize("result", [None, RuntimeError("store unavailable")])
+def test_default_store_refuses_an_unscoped_fallback(monkeypatch, result):
+    monkeypatch.delenv("LEARNING_WIKI_DIR", raising=False)
+    sdk = types.ModuleType("graph.sdk")
+
+    def plugin_store(*, plugin_id):
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    sdk.plugin_store = plugin_store
+    graph = types.ModuleType("graph")
+    graph.sdk = sdk
+    monkeypatch.setitem(sys.modules, "graph", graph)
+    monkeypatch.setitem(sys.modules, "graph.sdk", sdk)
+
+    with pytest.raises(RuntimeError, match="instance-scoped plugin store"):
+        learning_wiki._data_dir({})
 
 
 def test_config_and_env_overrides_stay_literal_and_skip_the_sdk(monkeypatch, tmp_path):
