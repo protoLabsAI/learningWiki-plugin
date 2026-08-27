@@ -25,12 +25,11 @@ def _data_dir(cfg: dict) -> Path:
     if override:
         p = Path(override).expanduser()
     else:
-        try:
-            from infra.paths import instance_paths  # host-only; lazy by design
+        # Lazy so the package stays importable in its host-free test suite. The
+        # manifest's v0.148 floor guarantees this seam in a real host.
+        from graph import sdk
 
-            p = instance_paths().store("learning_wiki")
-        except Exception:  # noqa: BLE001 — standalone / tests / older host
-            p = Path.home() / ".protoagent" / "learning_wiki"
+        p = sdk.plugin_store(plugin_id="learning_wiki")
     p.mkdir(parents=True, exist_ok=True)
     return p
 

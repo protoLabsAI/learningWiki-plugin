@@ -55,7 +55,7 @@ deliberately declines) is documented in [SEAMS.md](./SEAMS.md).
   contract in the manifest) when cards are due, and a desktop wake triggers a
   due check via the lifecycle-hook seam.
 
-Storage is instance-scoped SQLite (`instance_paths().store("learning_wiki")`),
+Storage is instance-scoped SQLite (`sdk.plugin_store(plugin_id="learning_wiki")`),
 no runtime pip deps; the FSRS-4.5 scheduler is pure Python with the published
 default weights (overridable via config).
 
