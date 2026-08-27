@@ -116,9 +116,17 @@ def registry(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def host_stub(monkeypatch):
+def host_stub(monkeypatch, tmp_path):
     """Fake graph.* modules; returns a call-capture dict."""
-    calls = {"scheduled": [], "cancelled": [], "watches": [], "metrics": [], "loops": [], "stopped_loops": []}
+    calls = {
+        "scheduled": [],
+        "cancelled": [],
+        "watches": [],
+        "metrics": [],
+        "loops": [],
+        "stopped_loops": [],
+        "plugin_stores": [],
+    }
 
     g = types.ModuleType("graph")
     goals_pkg = types.ModuleType("graph.goals")
@@ -156,6 +164,10 @@ def host_stub(monkeypatch):
     def record_metric(name, value, *, ts=None, plugin_id):
         calls["metrics"].append((name, value, plugin_id))
         return {}
+
+    def plugin_store(*, plugin_id):
+        calls["plugin_stores"].append(plugin_id)
+        return tmp_path / "plugin-store" / plugin_id
 
     class Knobs:
         def __init__(self, **kw):
@@ -197,6 +209,7 @@ def host_stub(monkeypatch):
     sdk.cancel_scheduled = cancel_scheduled
     sdk.create_watch = create_watch
     sdk.record_metric = record_metric
+    sdk.plugin_store = plugin_store
     sdk.Knobs = Knobs
     sdk.make_knob_tools = make_knob_tools
     sdk.start_goal_loop = start_goal_loop
