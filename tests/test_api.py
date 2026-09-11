@@ -15,6 +15,13 @@ def client(registry):
     return TestClient(app)
 
 
+def test_the_routers_leave_the_host_schema_buildable(client):
+    """A page route annotated `-> HTMLResponse` with a function-local import can't be
+    resolved when FastAPI builds the schema, and one such route takes the host's whole
+    /openapi.json down (found in QA on the desktop app, 2026-09-11)."""
+    assert "/plugins/learning_wiki/view" in client.app.openapi()["paths"]
+
+
 def test_view_served_on_declared_public_path(client):
     r = client.get("/plugins/learning_wiki/view")
     assert r.status_code == 200

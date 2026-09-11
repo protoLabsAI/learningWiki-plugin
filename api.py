@@ -15,8 +15,12 @@ def build_view_router(cfg: dict):
 
     r = APIRouter()
 
+    # No `-> HTMLResponse` annotation: under postponed annotations it is a string FastAPI
+    # resolves against this MODULE's globals, where the function-local import isn't
+    # visible — and even with `response_class=` set, the unresolved annotation made the
+    # host's /openapi.json answer 500 on every agent running this plugin.
     @r.get("/view", response_class=HTMLResponse)
-    async def _view() -> HTMLResponse:
+    async def _view():
         return HTMLResponse(PAGE)
 
     return r
